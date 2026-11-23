@@ -53,3 +53,4 @@ me2008.board/
 
 ## License
 MIT – feel free to fork and improve.
+\n# Build trigger
