@@ -24,27 +24,27 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import me2008.board.model.*
 
+// Vibrant palette featuring true pure black and high-contrast teacher colors
 val PaletteColors = listOf(
-    Color(0xFFE11D48), // Rose / Red
-    Color(0xFFEA580C), // Orange
-    Color(0xFFFACC15), // Yellow
-    Color(0xFF16A34A), // Green
-    Color(0xFF0284C7), // Sky Blue
+    Color(0xFF000000), // Pure Black
+    Color(0xFFFFFFFF), // Pure White
+    Color(0xFFE11D48), // Vivid Red
+    Color(0xFFFF6D00), // Neon Orange
+    Color(0xFFFACC15), // Warm Yellow
+    Color(0xFF16A34A), // Emerald Green
+    Color(0xFF00F5D4), // Neon Cyan
     Color(0xFF2563EB), // Royal Blue
-    Color(0xFF7C3AED), // Purple
-    Color(0xFF0F172A), // Slate Black
-    Color(0xFFFFFFFF)  // White
+    Color(0xFF9333EA), // Purple
+    Color(0xFFEC4899)  // Pink
 )
 
 @Composable
 fun UnifiedFloatingBottomBar(
-    // Page controls
     currentPage: Int,
     totalPages: Int,
     onPreviousPage: () -> Unit,
     onNextPage: () -> Unit,
     onAddPage: () -> Unit,
-    // Tool controls
     currentTool: ToolMode,
     onToolSelected: (ToolMode) -> Unit,
     selectedColor: Color,
@@ -59,11 +59,19 @@ fun UnifiedFloatingBottomBar(
     onCircuitTypeChange: (CircuitElementType) -> Unit,
     selectedStickerType: StickerType,
     onStickerTypeChange: (StickerType) -> Unit,
+    selectedFormulaType: FormulaType,
+    onFormulaTypeChange: (FormulaType) -> Unit,
     isRulerActive: Boolean,
     onToggleRuler: () -> Unit,
+    onDrawLineAlongRuler: () -> Unit,
     isProtractorActive: Boolean,
     onToggleProtractor: () -> Unit,
-    onOpenBgSettings: () -> Unit,
+    bgTheme: BackgroundColorTheme,
+    onBgThemeChange: (BackgroundColorTheme) -> Unit,
+    bgPattern: BackgroundPattern,
+    onBgPatternChange: (BackgroundPattern) -> Unit,
+    zoomScale: Float,
+    onResetZoom: () -> Unit,
     onUndo: () -> Unit,
     onClearPage: () -> Unit,
     modifier: Modifier = Modifier
@@ -73,10 +81,10 @@ fun UnifiedFloatingBottomBar(
     Column(
         modifier = modifier
             .wrapContentWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 6.dp, vertical = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Compact Floating Popup Pill above the dock
+        // Compact Sub-Tray above Dock (auto-applies changes immediately)
         AnimatedVisibility(
             visible = showToolPopup,
             enter = fadeIn(),
@@ -84,21 +92,21 @@ fun UnifiedFloatingBottomBar(
         ) {
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
                 tonalElevation = 6.dp,
                 shadowElevation = 6.dp,
                 modifier = Modifier
                     .padding(bottom = 6.dp)
-                    .widthIn(max = 480.dp)
+                    .widthIn(max = 520.dp)
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     when (currentTool) {
-                        ToolMode.PEN, ToolMode.HIGHLIGHTER -> {
+                        ToolMode.PEN, ToolMode.HIGHLIGHTER, ToolMode.STRAIGHT_LINE -> {
                             PenSubTray(
-                                isHighlighter = currentTool == ToolMode.HIGHLIGHTER,
+                                mode = currentTool,
                                 size = strokeSize,
                                 onSizeChange = onStrokeSizeChange,
                                 color = selectedColor,
@@ -133,6 +141,14 @@ fun UnifiedFloatingBottomBar(
                                 onColorChange = onColorSelected
                             )
                         }
+                        ToolMode.FORMULA -> {
+                            FormulaSubTray(
+                                selectedType = selectedFormulaType,
+                                onTypeChange = onFormulaTypeChange,
+                                color = selectedColor,
+                                onColorChange = onColorSelected
+                            )
+                        }
                         ToolMode.STICKER -> {
                             StickerSubTray(
                                 selectedType = selectedStickerType,
@@ -143,13 +159,23 @@ fun UnifiedFloatingBottomBar(
                             MathToolsSubTray(
                                 isRulerActive = isRulerActive,
                                 onToggleRuler = onToggleRuler,
+                                onDrawLineAlongRuler = onDrawLineAlongRuler,
                                 isProtractorActive = isProtractorActive,
                                 onToggleProtractor = onToggleProtractor
                             )
                         }
+                        ToolMode.BACKGROUND -> {
+                            // Instant background changer: no dialog, immediate update!
+                            BackgroundSubTray(
+                                currentTheme = bgTheme,
+                                onThemeChange = onBgThemeChange,
+                                currentPattern = bgPattern,
+                                onPatternChange = onBgPatternChange
+                            )
+                        }
                         ToolMode.LASER -> {
                             Text(
-                                "Laser pointer leaves a temporary glowing trace for presentations",
+                                "Neon laser pointer leaves a glowing orange trail for live presentations",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontSize = 11.sp
                             )
@@ -166,10 +192,10 @@ fun UnifiedFloatingBottomBar(
                                         showToolPopup = false
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                    modifier = Modifier.height(28.dp)
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(26.dp)
                                 ) {
-                                    Text("Clear All", fontSize = 11.sp)
+                                    Text("Clear All", fontSize = 10.sp)
                                 }
                             }
                         }
@@ -178,21 +204,21 @@ fun UnifiedFloatingBottomBar(
             }
         }
 
-        // Unified Horizontal Bottom Dock (Pages next to tools)
+        // Unified Horizontal Bottom Bar (Compact for 1600x900 / landscape)
         Surface(
             shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.96f),
             shadowElevation = 8.dp,
             tonalElevation = 4.dp
         ) {
             Row(
                 modifier = Modifier
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // --- 1. Compact Page Navigation (Next to tools) ---
+                // 1. Page Navigation (Next to tools)
                 CompactIconButton(
                     icon = Icons.Default.NavigateBefore,
                     contentDescription = "Previous Page",
@@ -202,8 +228,8 @@ fun UnifiedFloatingBottomBar(
 
                 Text(
                     text = "${currentPage + 1}/${totalPages}",
-                    fontSize = 12.sp,
-                    style = MaterialTheme.typography.labelMedium,
+                    fontSize = 11.sp,
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
@@ -221,10 +247,10 @@ fun UnifiedFloatingBottomBar(
                     onClick = onAddPage
                 )
 
-                VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 2.dp))
+                VerticalDivider(modifier = Modifier.height(18.dp).padding(horizontal = 1.dp))
 
-                // --- 2. Main Tools (In the middle) ---
-                // Pen (Freehand)
+                // 2. Tools (In Middle)
+                // Pen
                 ToolItemButton(
                     icon = Icons.Default.Edit,
                     isSelected = currentTool == ToolMode.PEN,
@@ -234,13 +260,23 @@ fun UnifiedFloatingBottomBar(
                     }
                 )
 
-                // Highlighter
+                // Marker / Highlighter
                 ToolItemButton(
                     icon = Icons.Default.Brush,
                     isSelected = currentTool == ToolMode.HIGHLIGHTER,
                     onClick = {
                         if (currentTool == ToolMode.HIGHLIGHTER) showToolPopup = !showToolPopup
                         else { onToolSelected(ToolMode.HIGHLIGHTER); showToolPopup = true }
+                    }
+                )
+
+                // Straight Line
+                ToolItemButton(
+                    icon = Icons.Default.HorizontalRule,
+                    isSelected = currentTool == ToolMode.STRAIGHT_LINE,
+                    onClick = {
+                        if (currentTool == ToolMode.STRAIGHT_LINE) showToolPopup = !showToolPopup
+                        else { onToolSelected(ToolMode.STRAIGHT_LINE); showToolPopup = true }
                     }
                 )
 
@@ -264,13 +300,23 @@ fun UnifiedFloatingBottomBar(
                     }
                 )
 
-                // Physics Circuits
+                // Physics Circuit
                 ToolItemButton(
                     icon = Icons.Default.ElectricBolt,
                     isSelected = currentTool == ToolMode.CIRCUIT,
                     onClick = {
                         if (currentTool == ToolMode.CIRCUIT) showToolPopup = !showToolPopup
                         else { onToolSelected(ToolMode.CIRCUIT); showToolPopup = true }
+                    }
+                )
+
+                // Math Formulas
+                ToolItemButton(
+                    icon = Icons.Default.Functions,
+                    isSelected = currentTool == ToolMode.FORMULA,
+                    onClick = {
+                        if (currentTool == ToolMode.FORMULA) showToolPopup = !showToolPopup
+                        else { onToolSelected(ToolMode.FORMULA); showToolPopup = true }
                     }
                 )
 
@@ -296,7 +342,7 @@ fun UnifiedFloatingBottomBar(
                     }
                 )
 
-                // Stamps / Stickers
+                // Stamps
                 ToolItemButton(
                     icon = Icons.Default.Star,
                     isSelected = currentTool == ToolMode.STICKER,
@@ -306,7 +352,7 @@ fun UnifiedFloatingBottomBar(
                     }
                 )
 
-                // Laser Pointer
+                // Laser
                 ToolItemButton(
                     icon = Icons.Default.Highlight,
                     isSelected = currentTool == ToolMode.LASER,
@@ -326,15 +372,37 @@ fun UnifiedFloatingBottomBar(
                     }
                 )
 
-                VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 2.dp))
+                VerticalDivider(modifier = Modifier.height(18.dp).padding(horizontal = 1.dp))
 
-                // --- 3. Board Utilities ---
-                // Background
-                CompactIconButton(
+                // 3. Board Utilities
+                // Background Style (Instant Sub-Tray)
+                ToolItemButton(
                     icon = Icons.Default.Palette,
-                    contentDescription = "Background Settings",
-                    onClick = onOpenBgSettings
+                    isSelected = currentTool == ToolMode.BACKGROUND,
+                    onClick = {
+                        if (currentTool == ToolMode.BACKGROUND) showToolPopup = !showToolPopup
+                        else { onToolSelected(ToolMode.BACKGROUND); showToolPopup = true }
+                    }
                 )
+
+                // Zoom Reset (if zoomed)
+                if (zoomScale != 1f) {
+                    Box(
+                        modifier = Modifier
+                            .height(28.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MaterialTheme.colorScheme.primaryContainer)
+                            .clickable(onClick = onResetZoom)
+                            .padding(horizontal = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "${(zoomScale * 100).toInt()}% ⟲",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
 
                 // Undo
                 CompactIconButton(
@@ -366,7 +434,7 @@ private fun CompactIconButton(
 ) {
     Box(
         modifier = Modifier
-            .size(30.dp)
+            .size(28.dp)
             .clip(CircleShape)
             .background(
                 if (isPrimary) MaterialTheme.colorScheme.primary
@@ -378,8 +446,8 @@ private fun CompactIconButton(
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            modifier = Modifier.size(17.dp),
-            tint = if (!enabled) Color.Gray.copy(alpha = 0.4f)
+            modifier = Modifier.size(16.dp),
+            tint = if (!enabled) Color.Gray.copy(alpha = 0.35f)
                    else if (isPrimary) MaterialTheme.colorScheme.onPrimary
                    else tint
         )
@@ -394,8 +462,8 @@ private fun ToolItemButton(
 ) {
     Box(
         modifier = Modifier
-            .size(32.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .size(30.dp)
+            .clip(RoundedCornerShape(7.dp))
             .background(
                 if (isSelected) MaterialTheme.colorScheme.primary
                 else Color.Transparent
@@ -406,7 +474,7 @@ private fun ToolItemButton(
         Icon(
             imageVector = icon,
             contentDescription = null,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(16.dp),
             tint = if (isSelected) MaterialTheme.colorScheme.onPrimary
                    else MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -426,7 +494,7 @@ private fun CompactColorPalette(selectedColor: Color, onColorChange: (Color) -> 
             val isCurrent = color == selectedColor
             Box(
                 modifier = Modifier
-                    .size(if (isCurrent) 22.dp else 18.dp)
+                    .size(if (isCurrent) 22.dp else 17.dp)
                     .clip(CircleShape)
                     .background(color)
                     .border(
@@ -442,7 +510,7 @@ private fun CompactColorPalette(selectedColor: Color, onColorChange: (Color) -> 
 
 @Composable
 private fun PenSubTray(
-    isHighlighter: Boolean,
+    mode: ToolMode,
     size: Float,
     onSizeChange: (Float) -> Unit,
     color: Color,
@@ -454,12 +522,17 @@ private fun PenSubTray(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text(if (isHighlighter) "Marker:" else "Pen:", fontSize = 11.sp)
+            val label = when (mode) {
+                ToolMode.HIGHLIGHTER -> "Marker:"
+                ToolMode.STRAIGHT_LINE -> "Line:"
+                else -> "Pen:"
+            }
+            Text(label, fontSize = 11.sp)
             Slider(
                 value = size,
                 onValueChange = onSizeChange,
-                valueRange = if (isHighlighter) 12f..60f else 2f..36f,
-                modifier = Modifier.weight(1f).height(24.dp)
+                valueRange = if (mode == ToolMode.HIGHLIGHTER) 10f..50f else 2f..30f,
+                modifier = Modifier.weight(1f).height(22.dp)
             )
             Text("${size.toInt()}px", fontSize = 10.sp)
         }
@@ -478,7 +551,7 @@ private fun PinSubTray(
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             PinShape.values().forEach { shape ->
@@ -486,7 +559,7 @@ private fun PinSubTray(
                     selected = selectedShape == shape,
                     onClick = { onShapeChange(shape) },
                     label = { Text(shape.label, fontSize = 10.sp) },
-                    modifier = Modifier.height(26.dp)
+                    modifier = Modifier.height(24.dp)
                 )
             }
         }
@@ -499,8 +572,8 @@ private fun PinSubTray(
             Slider(
                 value = size,
                 onValueChange = onSizeChange,
-                valueRange = 16f..80f,
-                modifier = Modifier.weight(1f).height(24.dp)
+                valueRange = 16f..72f,
+                modifier = Modifier.weight(1f).height(22.dp)
             )
             Text("${size.toInt()}px", fontSize = 10.sp)
         }
@@ -519,7 +592,7 @@ private fun ShapeSubTray(
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             ShapeType.values().forEach { shape ->
@@ -527,7 +600,7 @@ private fun ShapeSubTray(
                     selected = selectedShape == shape,
                     onClick = { onShapeChange(shape) },
                     label = { Text(shape.label, fontSize = 10.sp) },
-                    modifier = Modifier.height(26.dp)
+                    modifier = Modifier.height(24.dp)
                 )
             }
         }
@@ -535,12 +608,12 @@ private fun ShapeSubTray(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Line Width:", fontSize = 11.sp)
+            Text("Width:", fontSize = 11.sp)
             Slider(
                 value = strokeWidth,
                 onValueChange = onStrokeWidthChange,
-                valueRange = 2f..24f,
-                modifier = Modifier.weight(1f).height(24.dp)
+                valueRange = 2f..20f,
+                modifier = Modifier.weight(1f).height(22.dp)
             )
             Text("${strokeWidth.toInt()}px", fontSize = 10.sp)
         }
@@ -558,7 +631,7 @@ private fun CircuitSubTray(
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text("Tap board to drop physics schematic element:", fontSize = 10.sp)
         Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 2.dp),
+            modifier = Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             CircuitElementType.values().forEach { element ->
@@ -566,7 +639,33 @@ private fun CircuitSubTray(
                     selected = selectedType == element,
                     onClick = { onTypeChange(element) },
                     label = { Text("${element.symbol} ${element.label}", fontSize = 10.sp) },
-                    modifier = Modifier.height(26.dp)
+                    modifier = Modifier.height(24.dp)
+                )
+            }
+        }
+        CompactColorPalette(selectedColor = color, onColorChange = onColorChange)
+    }
+}
+
+@Composable
+private fun FormulaSubTray(
+    selectedType: FormulaType,
+    onTypeChange: (FormulaType) -> Unit,
+    color: Color,
+    onColorChange: (Color) -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("Tap board to place math formula stamp:", fontSize = 10.sp)
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            FormulaType.values().forEach { item ->
+                FilterChip(
+                    selected = selectedType == item,
+                    onClick = { onTypeChange(item) },
+                    label = { Text(item.formula, fontSize = 11.sp) },
+                    modifier = Modifier.height(24.dp)
                 )
             }
         }
@@ -580,17 +679,17 @@ private fun StickerSubTray(
     onTypeChange: (StickerType) -> Unit
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Tap board to stamp symbol:", fontSize = 10.sp)
+        Text("Tap board to stamp reaction sticker:", fontSize = 10.sp)
         Row(
-            modifier = Modifier.padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.padding(vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             StickerType.values().forEach { sticker ->
                 FilterChip(
                     selected = selectedType == sticker,
                     onClick = { onTypeChange(sticker) },
-                    label = { Text("${sticker.symbol} ${sticker.label}", fontSize = 12.sp) },
-                    modifier = Modifier.height(30.dp)
+                    label = { Text("${sticker.symbol} ${sticker.label}", fontSize = 11.sp) },
+                    modifier = Modifier.height(26.dp)
                 )
             }
         }
@@ -601,28 +700,83 @@ private fun StickerSubTray(
 private fun MathToolsSubTray(
     isRulerActive: Boolean,
     onToggleRuler: () -> Unit,
+    onDrawLineAlongRuler: () -> Unit,
     isProtractorActive: Boolean,
     onToggleProtractor: () -> Unit
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Button(
             onClick = onToggleRuler,
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-            modifier = Modifier.height(30.dp)
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+            modifier = Modifier.height(26.dp)
         ) {
-            Text(if (isRulerActive) "Hide Ruler" else "Show Ruler 📏", fontSize = 11.sp)
+            Text(if (isRulerActive) "Hide Ruler" else "Show Ruler 📏", fontSize = 10.sp)
+        }
+
+        if (isRulerActive) {
+            FilledTonalButton(
+                onClick = onDrawLineAlongRuler,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                modifier = Modifier.height(26.dp)
+            ) {
+                Text("Draw Ruler Line ✍️", fontSize = 10.sp)
+            }
         }
 
         Button(
             onClick = onToggleProtractor,
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-            modifier = Modifier.height(30.dp)
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+            modifier = Modifier.height(26.dp)
         ) {
-            Text(if (isProtractorActive) "Hide Protractor" else "Show Protractor 📐", fontSize = 11.sp)
+            Text(if (isProtractorActive) "Hide Angle" else "Protractor 📐", fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+private fun BackgroundSubTray(
+    currentTheme: BackgroundColorTheme,
+    onThemeChange: (BackgroundColorTheme) -> Unit,
+    currentPattern: BackgroundPattern,
+    onPatternChange: (BackgroundPattern) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        // Theme selection (instant change)
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            BackgroundColorTheme.values().forEach { theme ->
+                FilterChip(
+                    selected = currentTheme == theme,
+                    onClick = { onThemeChange(theme) },
+                    label = { Text(theme.displayName, fontSize = 10.sp) },
+                    modifier = Modifier.height(24.dp)
+                )
+            }
+        }
+
+        // Pattern selection (instant change)
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            BackgroundPattern.values().forEach { pattern ->
+                FilterChip(
+                    selected = currentPattern == pattern,
+                    onClick = { onPatternChange(pattern) },
+                    label = { Text(pattern.displayName, fontSize = 10.sp) },
+                    modifier = Modifier.height(24.dp)
+                )
+            }
         }
     }
 }

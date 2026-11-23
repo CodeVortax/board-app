@@ -1,11 +1,15 @@
 package me2008.board.ui
 
 import android.graphics.Paint
+import android.graphics.Typeface
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -15,6 +19,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.pointer.pointerInput
 import me2008.board.model.*
 import kotlin.math.*
@@ -26,6 +32,7 @@ fun BoardCanvas(
     shapes: List<DrawnShapeItem>,
     circuits: List<CircuitItem>,
     stickers: List<StickerItem>,
+    formulas: List<FormulaItem>,
     activeStroke: List<Offset>?,
     activeStrokeColor: Color,
     activeStrokeWidth: Float,
@@ -41,6 +48,9 @@ fun BoardCanvas(
     protractorOffset: Offset,
     protractorAngle: Float,
     toolMode: ToolMode,
+    zoomScale: Float,
+    panOffset: Offset,
+    onTransform: (panChange: Offset, zoomChange: Float) -> Unit,
     onTap: (Offset) -> Unit,
     onDragStart: (Offset) -> Unit,
     onDrag: (Offset) -> Unit,
@@ -51,57 +61,97 @@ fun BoardCanvas(
     onProtractorRotate: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Keep updated state references so gestures never restart or cancel on state mutation
+    val currentRulerOffset by rememberUpdatedState(rulerOffset)
+    val currentRulerAngle by rememberUpdatedState(rulerAngle)
+    val currentIsRulerVisible by rememberUpdatedState(isRulerVisible)
+    val currentProtractorOffset by rememberUpdatedState(protractorOffset)
+    val currentProtractorAngle by rememberUpdatedState(protractorAngle)
+    val currentIsProtractorVisible by rememberUpdatedState(isProtractorVisible)
+    val currentToolMode by rememberUpdatedState(toolMode)
+    val currentZoom by rememberUpdatedState(zoomScale)
+    val currentPan by rememberUpdatedState(panOffset)
+
+    val currentOnRulerDrag by rememberUpdatedState(onRulerDrag)
+    val currentOnRulerRotate by rememberUpdatedState(onRulerRotate)
+    val currentOnProtractorDrag by rememberUpdatedState(onProtractorDrag)
+    val currentOnProtractorRotate by rememberUpdatedState(onProtractorRotate)
+    val currentOnDragStart by rememberUpdatedState(onDragStart)
+    val currentOnDrag by rememberUpdatedState(onDrag)
+    val currentOnDragEnd by rememberUpdatedState(onDragEnd)
+    val currentOnTap by rememberUpdatedState(onTap)
+    val currentOnTransform by rememberUpdatedState(onTransform)
+
+    fun screenToBoard(screen: Offset): Offset {
+        return (screen - currentPan) / currentZoom
+    }
+
     Canvas(
         modifier = modifier
             .fillMaxSize()
-            .pointerInput(toolMode, isRulerVisible, isProtractorVisible, rulerOffset, protractorOffset) {
-                detectTapGestures { offset ->
-                    onTap(offset)
+            // Pinch-to-zoom & two-finger pan detection
+            .pointerInput(Unit) {
+                detectTransformGestures { _, pan, zoom, _ ->
+                    if (zoom != 1f || pan != Offset.Zero) {
+                        currentOnTransform(pan, zoom)
+                    }
                 }
             }
-            .pointerInput(toolMode, isRulerVisible, isProtractorVisible, rulerOffset, protractorOffset) {
+            // Tap gestures with coordinate transformation
+            .pointerInput(Unit) {
+                detectTapGestures { screenOffset ->
+                    val boardOffset = screenToBoard(screenOffset)
+                    currentOnTap(boardOffset)
+                }
+            }
+            // Drawing & tool drag gestures
+            .pointerInput(Unit) {
                 var isDraggingRuler = false
                 var isRotatingRuler = false
                 var isDraggingProtractor = false
                 var isRotatingProtractor = false
 
                 detectDragGestures(
-                    onDragStart = { offset ->
-                        if (isRulerVisible && isNearRulerRotateHandle(offset, rulerOffset, rulerAngle)) {
+                    onDragStart = { screenOffset ->
+                        val boardOffset = screenToBoard(screenOffset)
+                        if (currentIsRulerVisible && isNearRulerRotateHandle(boardOffset, currentRulerOffset, currentRulerAngle)) {
                             isRotatingRuler = true
-                        } else if (isRulerVisible && isNearRulerBody(offset, rulerOffset, rulerAngle)) {
+                        } else if (currentIsRulerVisible && isNearRulerBody(boardOffset, currentRulerOffset, currentRulerAngle)) {
                             isDraggingRuler = true
-                        } else if (isProtractorVisible && isNearProtractorRotate(offset, protractorOffset, protractorAngle)) {
+                        } else if (currentIsProtractorVisible && isNearProtractorRotate(boardOffset, currentProtractorOffset, currentProtractorAngle)) {
                             isRotatingProtractor = true
-                        } else if (isProtractorVisible && isNearProtractorBody(offset, protractorOffset, protractorAngle)) {
+                        } else if (currentIsProtractorVisible && isNearProtractorBody(boardOffset, currentProtractorOffset, currentProtractorAngle)) {
                             isDraggingProtractor = true
                         } else {
-                            onDragStart(offset)
+                            currentOnDragStart(boardOffset)
                         }
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
+                        val boardPos = screenToBoard(change.position)
+                        val scaledDragAmount = dragAmount / currentZoom
+
                         when {
                             isRotatingRuler -> {
-                                val dx = change.position.x - rulerOffset.x
-                                val dy = change.position.y - rulerOffset.y
+                                val dx = boardPos.x - currentRulerOffset.x
+                                val dy = boardPos.y - currentRulerOffset.y
                                 val angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
-                                onRulerRotate(angle)
+                                currentOnRulerRotate(angle)
                             }
                             isDraggingRuler -> {
-                                onRulerDrag(dragAmount)
+                                currentOnRulerDrag(scaledDragAmount)
                             }
                             isRotatingProtractor -> {
-                                val dx = change.position.x - protractorOffset.x
-                                val dy = change.position.y - protractorOffset.y
+                                val dx = boardPos.x - currentProtractorOffset.x
+                                val dy = boardPos.y - currentProtractorOffset.y
                                 val angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
-                                onProtractorRotate(angle)
+                                currentOnProtractorRotate(angle)
                             }
                             isDraggingProtractor -> {
-                                onProtractorDrag(dragAmount)
+                                currentOnProtractorDrag(scaledDragAmount)
                             }
                             else -> {
-                                onDrag(change.position)
+                                currentOnDrag(boardPos)
                             }
                         }
                     },
@@ -110,78 +160,88 @@ fun BoardCanvas(
                         isRotatingRuler = false
                         isDraggingProtractor = false
                         isRotatingProtractor = false
-                        onDragEnd()
+                        currentOnDragEnd()
                     }
                 )
             }
     ) {
-        // 1. Draw Background Color
+        // Base screen background color
         drawRect(color = bgTheme.color)
 
-        // 2. Draw Background Pattern
-        drawBackgroundPattern(bgPattern, bgTheme.gridColor)
+        // Apply Zoom and Pan transformations to everything drawn on board
+        translate(left = panOffset.x, top = panOffset.y) {
+            scale(scale = zoomScale, pivot = Offset.Zero) {
+                // Background Pattern
+                drawBackgroundPattern(bgPattern, bgTheme.gridColor, size, zoomScale, panOffset)
 
-        // 3. Draw Completed Strokes (with Bézier smoothing)
-        strokes.forEach { stroke ->
-            drawSmoothStroke(stroke)
-        }
+                // Completed Strokes
+                strokes.forEach { stroke ->
+                    drawSmoothStroke(stroke)
+                }
 
-        // Active Stroke: Drawn with EXACT same color, width, and alpha
-        activeStroke?.let { pts ->
-            if (pts.isNotEmpty()) {
-                val liveStroke = StrokeItem(
-                    points = pts,
-                    color = activeStrokeColor,
-                    strokeWidth = activeStrokeWidth,
-                    isHighlighter = isActiveHighlighter
-                )
-                drawSmoothStroke(liveStroke)
+                // Active live stroke
+                activeStroke?.let { pts ->
+                    if (pts.isNotEmpty()) {
+                        val liveStroke = StrokeItem(
+                            points = pts,
+                            color = activeStrokeColor,
+                            strokeWidth = activeStrokeWidth,
+                            isHighlighter = isActiveHighlighter
+                        )
+                        drawSmoothStroke(liveStroke)
+                    }
+                }
+
+                // Shapes
+                shapes.forEach { shape ->
+                    drawShapeItem(shape)
+                }
+
+                // Shape Preview
+                previewShape?.let { shape ->
+                    drawShapeItem(shape)
+                }
+
+                // Pins
+                pins.forEach { pin ->
+                    drawPinItem(pin)
+                }
+
+                // Circuit Components
+                circuits.forEach { circuit ->
+                    drawCircuitElement(circuit)
+                }
+
+                // Formulas
+                formulas.forEach { formula ->
+                    drawFormulaItem(formula)
+                }
+
+                // Stamps / Stickers
+                stickers.forEach { sticker ->
+                    drawStickerItem(sticker)
+                }
+
+                // Interactive Math Ruler
+                if (isRulerVisible) {
+                    drawInteractiveRuler(rulerOffset, rulerAngle)
+                }
+
+                // Interactive Math Protractor
+                if (isProtractorVisible) {
+                    drawInteractiveProtractor(protractorOffset, protractorAngle)
+                }
             }
         }
 
-        // 4. Draw Shapes
-        shapes.forEach { shape ->
-            drawShapeItem(shape)
-        }
-
-        // Preview Shape
-        previewShape?.let { shape ->
-            drawShapeItem(shape)
-        }
-
-        // 5. Draw Pins
-        pins.forEach { pin ->
-            drawPinItem(pin)
-        }
-
-        // 6. Draw Circuit Components
-        circuits.forEach { circuit ->
-            drawCircuitElement(circuit)
-        }
-
-        // 7. Draw Stickers / Stamps
-        stickers.forEach { sticker ->
-            drawStickerItem(sticker)
-        }
-
-        // 8. Draw Laser Pointer Trail
+        // Laser pointer drawn in screen space for maximum crisp neon glow
         if (laserPoints.isNotEmpty()) {
-            drawLaserTrail(laserPoints)
-        }
-
-        // 9. Draw Interactive Math Ruler
-        if (isRulerVisible) {
-            drawInteractiveRuler(rulerOffset, rulerAngle)
-        }
-
-        // 10. Draw Interactive Math Protractor
-        if (isProtractorVisible) {
-            drawInteractiveProtractor(protractorOffset, protractorAngle)
+            drawContinuousLaserTrail(laserPoints, zoomScale, panOffset)
         }
     }
 }
 
-// Geometry helper for Bézier curve generation
+// Bézier curve smoothing helper
 fun buildSmoothPath(points: List<Offset>): Path {
     val path = Path()
     if (points.isEmpty()) return path
@@ -217,27 +277,38 @@ private fun DrawScope.drawSmoothStroke(stroke: StrokeItem) {
     )
 }
 
-private fun DrawScope.drawBackgroundPattern(pattern: BackgroundPattern, color: Color) {
-    val step = 40f
+private fun DrawScope.drawBackgroundPattern(
+    pattern: BackgroundPattern,
+    color: Color,
+    viewportSize: Size,
+    zoom: Float,
+    pan: Offset
+) {
+    val step = 44f
+    val startX = ((-pan.x) / zoom).coerceAtLeast(-5000f)
+    val endX = ((viewportSize.width - pan.x) / zoom).coerceAtMost(10000f)
+    val startY = ((-pan.y) / zoom).coerceAtLeast(-5000f)
+    val endY = ((viewportSize.height - pan.y) / zoom).coerceAtMost(10000f)
+
     when (pattern) {
         BackgroundPattern.PLAIN -> {}
         BackgroundPattern.GRID -> {
-            var x = 0f
-            while (x < size.width) {
-                drawLine(color, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
+            var x = (floor(startX / step) * step)
+            while (x < endX) {
+                drawLine(color, Offset(x, startY), Offset(x, endY), strokeWidth = 1f)
                 x += step
             }
-            var y = 0f
-            while (y < size.height) {
-                drawLine(color, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+            var y = (floor(startY / step) * step)
+            while (y < endY) {
+                drawLine(color, Offset(startX, y), Offset(endX, y), strokeWidth = 1f)
                 y += step
             }
         }
         BackgroundPattern.DOTS -> {
-            var x = step / 2
-            while (x < size.width) {
-                var y = step / 2
-                while (y < size.height) {
+            var x = (floor(startX / step) * step)
+            while (x < endX) {
+                var y = (floor(startY / step) * step)
+                while (y < endY) {
                     drawCircle(color, radius = 2f, center = Offset(x, y))
                     y += step
                 }
@@ -245,9 +316,9 @@ private fun DrawScope.drawBackgroundPattern(pattern: BackgroundPattern, color: C
             }
         }
         BackgroundPattern.LINES -> {
-            var y = step
-            while (y < size.height) {
-                drawLine(color, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+            var y = (floor(startY / step) * step)
+            while (y < endY) {
+                drawLine(color, Offset(startX, y), Offset(endX, y), strokeWidth = 1f)
                 y += step
             }
         }
@@ -294,7 +365,6 @@ private fun DrawScope.drawPinItem(pin: PinItem) {
             drawPath(path, color = pin.color)
         }
         PinShape.PUSHPIN -> {
-            // Pushpin needle + head
             drawLine(Color.Gray, pin.position, pin.position + Offset(radius * 0.8f, radius * 0.8f), strokeWidth = 3f)
             drawCircle(pin.color, radius = radius * 0.8f, center = pin.position)
             drawCircle(Color.White.copy(alpha = 0.5f), radius = radius * 0.3f, center = pin.position - Offset(radius * 0.2f, radius * 0.2f))
@@ -348,15 +418,12 @@ private fun DrawScope.drawShapeItem(shape: DrawnShapeItem) {
             val top = min(shape.start.y, shape.end.y)
             val bottom = max(shape.start.y, shape.end.y)
 
-            // X Axis
             drawLine(shape.color, Offset(left, midY), Offset(right, midY), strokeWidth = shape.strokeWidth)
             drawArrowHead(Offset(right, midY), Offset(left, midY), shape.color, shape.strokeWidth)
 
-            // Y Axis
             drawLine(shape.color, Offset(midX, bottom), Offset(midX, top), strokeWidth = shape.strokeWidth)
             drawArrowHead(Offset(midX, top), Offset(midX, bottom), shape.color, shape.strokeWidth)
 
-            // Ticks on X and Y
             val tickStep = 32f
             var tx = midX + tickStep
             while (tx < right - 20f) {
@@ -478,7 +545,6 @@ private fun DrawScope.drawCircuitElement(circuit: CircuitItem) {
         CircuitElementType.VOLTMETER -> {
             drawLine(c, Offset(x - 45f, y), Offset(x - 20f, y), strokeWidth = 3.5f)
             drawCircle(c, radius = 20f, center = Offset(x, y), style = Stroke(3.5f))
-            // V letter inside
             val path = Path().apply {
                 moveTo(x - 8f, y - 8f)
                 lineTo(x, y + 8f)
@@ -490,7 +556,6 @@ private fun DrawScope.drawCircuitElement(circuit: CircuitItem) {
         CircuitElementType.AMMETER -> {
             drawLine(c, Offset(x - 45f, y), Offset(x - 20f, y), strokeWidth = 3.5f)
             drawCircle(c, radius = 20f, center = Offset(x, y), style = Stroke(3.5f))
-            // A letter inside
             val path = Path().apply {
                 moveTo(x - 8f, y + 8f)
                 lineTo(x, y - 8f)
@@ -537,27 +602,66 @@ private fun DrawScope.drawStickerItem(sticker: StickerItem) {
     }
 }
 
-private fun DrawScope.drawLaserTrail(points: List<LaserPoint>) {
-    val now = System.currentTimeMillis()
-    val active = points.filter { now - it.timestamp < 1200L }
-    if (active.isEmpty()) return
-
-    for (i in active.indices) {
-        val pt = active[i]
-        val age = (now - pt.timestamp) / 1200f
-        val alpha = (1f - age).coerceIn(0f, 1f)
-        val radius = (12f * (1f - age * 0.5f)).coerceAtLeast(3f)
-
-        drawCircle(
-            color = Color(0xFFFF1744).copy(alpha = alpha),
-            radius = radius,
-            center = pt.position
+private fun DrawScope.drawFormulaItem(formula: FormulaItem) {
+    drawIntoCanvas { canvas ->
+        val paint = Paint().apply {
+            textSize = formula.fontSize
+            textAlign = Paint.Align.LEFT
+            color = formula.color.toArgb()
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            isAntiAlias = true
+        }
+        canvas.nativeCanvas.drawText(
+            formula.text,
+            formula.position.x,
+            formula.position.y,
+            paint
         )
     }
-    // Bright white core on latest point
-    active.lastOrNull()?.let { last ->
-        drawCircle(Color.White, radius = 5f, center = last.position)
+}
+
+// Continuous Glowing Neon Orange Laser Trail
+private fun DrawScope.drawContinuousLaserTrail(
+    points: List<LaserPoint>,
+    zoom: Float,
+    pan: Offset
+) {
+    val now = System.currentTimeMillis()
+    val active = points.filter { now - it.timestamp < 1200L }
+    if (active.size < 2) return
+
+    val path = Path()
+    val first = (active.first().position * zoom) + pan
+    path.moveTo(first.x, first.y)
+
+    for (i in 1 until active.size) {
+        val pt = (active[i].position * zoom) + pan
+        path.lineTo(pt.x, pt.y)
     }
+
+    // Outer neon glow
+    drawPath(
+        path = path,
+        color = Color(0xFFFF6D00).copy(alpha = 0.45f),
+        style = Stroke(width = 16f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+    )
+    // Core neon orange streak
+    drawPath(
+        path = path,
+        color = Color(0xFFFF9100),
+        style = Stroke(width = 7f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+    )
+    // Hot white-gold center
+    drawPath(
+        path = path,
+        color = Color(0xFFFFFBEB),
+        style = Stroke(width = 2.5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+    )
+
+    // Leading pointer tip
+    val tip = (active.last().position * zoom) + pan
+    drawCircle(Color(0xFFFF9100), radius = 10f, center = tip)
+    drawCircle(Color.White, radius = 5f, center = tip)
 }
 
 // Interactive Ruler
@@ -568,7 +672,6 @@ private fun DrawScope.drawInteractiveRuler(center: Offset, angle: Float) {
     rotate(angle, pivot = center) {
         val topLeft = Offset(center.x - rulerWidth / 2f, center.y - rulerHeight / 2f)
 
-        // Semi-transparent acrylic ruler body
         drawRoundRect(
             color = Color(0xE6FFFBEB),
             topLeft = topLeft,
@@ -583,7 +686,6 @@ private fun DrawScope.drawInteractiveRuler(center: Offset, angle: Float) {
             style = Stroke(2f)
         )
 
-        // Scale markings
         val numCm = 10
         val cmSpacing = (rulerWidth - 40f) / numCm
         val startX = topLeft.x + 20f
@@ -591,7 +693,6 @@ private fun DrawScope.drawInteractiveRuler(center: Offset, angle: Float) {
 
         for (cm in 0..numCm) {
             val cmX = startX + cm * cmSpacing
-            // Major CM tick
             drawLine(
                 color = Color(0xFFB45309),
                 start = Offset(cmX, topY),
@@ -599,7 +700,6 @@ private fun DrawScope.drawInteractiveRuler(center: Offset, angle: Float) {
                 strokeWidth = 2f
             )
 
-            // Millimeter ticks
             if (cm < numCm) {
                 for (mm in 1..4) {
                     val mmX = cmX + mm * (cmSpacing / 10f)
@@ -610,7 +710,6 @@ private fun DrawScope.drawInteractiveRuler(center: Offset, angle: Float) {
                         strokeWidth = 1f
                     )
                 }
-                // 5mm half-cm tick
                 val halfX = cmX + 5 * (cmSpacing / 10f)
                 drawLine(
                     color = Color(0xFFB45309),
@@ -630,16 +729,16 @@ private fun DrawScope.drawInteractiveRuler(center: Offset, angle: Float) {
             }
         }
 
-        // Center Drag Handle indicator
+        // Center Drag Handle
         drawCircle(
-            color = Color(0xFFD97706).copy(alpha = 0.4f),
+            color = Color(0xFFD97706).copy(alpha = 0.5f),
             radius = 16f,
             center = center
         )
 
-        // Rotate Handle at right end
+        // Rotate Handle at right edge
         val rotateHandle = Offset(topLeft.x + rulerWidth - 24f, center.y)
-        drawCircle(Color(0xFFD97706), radius = 12f, center = rotateHandle)
+        drawCircle(Color(0xFFD97706), radius = 13f, center = rotateHandle)
         drawCircle(Color.White, radius = 5f, center = rotateHandle)
     }
 }
@@ -648,7 +747,6 @@ private fun DrawScope.drawInteractiveRuler(center: Offset, angle: Float) {
 private fun DrawScope.drawInteractiveProtractor(center: Offset, angle: Float) {
     val radius = 200f
     rotate(angle, pivot = center) {
-        // Semi-circle background
         val rect = Rect(center.x - radius, center.y - radius, center.x + radius, center.y + radius)
         drawArc(
             color = Color(0xD9E0F2FE),
@@ -668,7 +766,6 @@ private fun DrawScope.drawInteractiveProtractor(center: Offset, angle: Float) {
             style = Stroke(2f)
         )
 
-        // Baseline
         drawLine(
             Color(0xFF0284C7),
             Offset(center.x - radius, center.y),
@@ -676,7 +773,6 @@ private fun DrawScope.drawInteractiveProtractor(center: Offset, angle: Float) {
             strokeWidth = 2f
         )
 
-        // Degree ticks around perimeter every 10 degrees
         for (deg in 0..180 step 10) {
             val rad = Math.toRadians((180 - deg).toDouble())
             val outerX = (center.x + radius * cos(rad)).toFloat()
@@ -693,13 +789,11 @@ private fun DrawScope.drawInteractiveProtractor(center: Offset, angle: Float) {
             )
         }
 
-        // Center origin mark
         drawCircle(Color(0xFF0284C7), radius = 6f, center = center)
         drawCircle(Color.White, radius = 2f, center = center)
 
-        // Rotate handle at top apex (90 degrees)
         val apex = Offset(center.x, center.y - radius + 22f)
-        drawCircle(Color(0xFF0284C7), radius = 10f, center = apex)
+        drawCircle(Color(0xFF0284C7), radius = 11f, center = apex)
         drawCircle(Color.White, radius = 4f, center = apex)
     }
 }
@@ -710,7 +804,7 @@ private fun isNearRulerBody(pt: Offset, center: Offset, angle: Float): Boolean {
     val rad = -Math.toRadians(angle.toDouble())
     val localX = dx * cos(rad) - dy * sin(rad)
     val localY = dx * sin(rad) + dy * cos(rad)
-    return abs(localX) <= 240f && abs(localY) <= 36f
+    return abs(localX) <= 240f && abs(localY) <= 40f
 }
 
 private fun isNearRulerRotateHandle(pt: Offset, center: Offset, angle: Float): Boolean {
@@ -719,7 +813,7 @@ private fun isNearRulerRotateHandle(pt: Offset, center: Offset, angle: Float): B
     val rad = -Math.toRadians(angle.toDouble())
     val localX = dx * cos(rad) - dy * sin(rad)
     val localY = dx * sin(rad) + dy * cos(rad)
-    return hypot(localX - (240f - 24f), localY) < 32f
+    return hypot(localX - (240f - 24f), localY) < 36f
 }
 
 private fun isNearProtractorBody(pt: Offset, center: Offset, angle: Float): Boolean {
@@ -734,5 +828,5 @@ private fun isNearProtractorRotate(pt: Offset, center: Offset, angle: Float): Bo
     val rad = -Math.toRadians(angle.toDouble())
     val localX = dx * cos(rad) - dy * sin(rad)
     val localY = dx * sin(rad) + dy * cos(rad)
-    return hypot(localX, localY - (-200f + 22f)) < 30f
+    return hypot(localX, localY - (-200f + 22f)) < 32f
 }

@@ -6,19 +6,22 @@ import androidx.compose.ui.graphics.Color
 enum class ToolMode(val label: String) {
     PEN("Pen"),
     HIGHLIGHTER("Marker"),
+    STRAIGHT_LINE("Line"),
     PIN("Pin"),
     SHAPE("Shapes"),
     CIRCUIT("Physics"),
+    FORMULA("Math"),
+    STICKER("Stamps"),
     RULER("Ruler"),
     PROTRACTOR("Angle"),
-    STICKER("Stamps"),
+    BACKGROUND("Style"),
     LASER("Laser"),
     ERASER("Eraser")
 }
 
 enum class PinShape(val label: String) {
-    CIRCLE("Dot"),
-    SQUARE("Block"),
+    CIRCLE("Circle"),
+    SQUARE("Square"),
     DIAMOND("Diamond"),
     STAR("Star"),
     PUSHPIN("Pin")
@@ -57,17 +60,29 @@ enum class StickerType(val symbol: String, val label: String) {
     IMPORTANT("❗", "Note")
 }
 
+enum class FormulaType(val formula: String, val title: String) {
+    OHM("V = I · R", "Ohm's Law"),
+    NEWTON("F = m · a", "Newton 2nd"),
+    EINSTEIN("E = m · c²", "Mass-Energy"),
+    POWER("P = V · I", "Elec. Power"),
+    PYTHAGORAS("a² + b² = c²", "Pythagoras"),
+    VELOCITY("v = d / t", "Velocity"),
+    KINETIC("Ek = ½ · m · v²", "Kinetic E"),
+    QUADRATIC("x = (-b ± √Δ) / 2a", "Quadratic")
+}
+
 enum class BackgroundColorTheme(
     val displayName: String,
     val color: Color,
     val gridColor: Color,
     val textColor: Color
 ) {
-    WHITE("Whiteboard", Color(0xFFF8FAFC), Color(0xFFCBD5E1), Color(0xFF0F172A)),
-    BLACK("Blackboard", Color(0xFF0F172A), Color(0xFF334155), Color(0xFFF8FAFC)),
-    GREEN("Chalk Green", Color(0xFF14532D), Color(0xFF166534), Color(0xFFF0FDF4)),
-    BLUEPRINT("Blueprint", Color(0xFF1E3A8A), Color(0xFF1D4ED8), Color(0xFFEFF6FF)),
-    WARM("Cream Paper", Color(0xFFFEF3C7), Color(0xFFFDE68A), Color(0xFF78350F))
+    BLACK("Pure Black", Color(0xFF000000), Color(0xFF262626), Color(0xFFFFFFFF)),
+    CHALKBOARD("Chalkboard", Color(0xFF18181B), Color(0xFF27272A), Color(0xFFF4F4F5)),
+    WHITE("Whiteboard", Color(0xFFFFFFFF), Color(0xFFE2E8F0), Color(0xFF09090B)),
+    GREEN("Chalk Green", Color(0xFF0F3D24), Color(0xFF14532D), Color(0xFFF0FDF4)),
+    BLUEPRINT("Blueprint", Color(0xFF0C2461), Color(0xFF1E3799), Color(0xFFEFF6FF)),
+    WARM("Cream Paper", Color(0xFFFAF5EF), Color(0xFFE8DFC8), Color(0xFF451A03))
 }
 
 enum class BackgroundPattern(val displayName: String) {
@@ -114,6 +129,14 @@ data class StickerItem(
     val position: Offset,
     val type: StickerType,
     val size: Float = 36f
+)
+
+data class FormulaItem(
+    val id: Long = System.nanoTime(),
+    val position: Offset,
+    val text: String,
+    val color: Color,
+    val fontSize: Float = 22f
 )
 
 data class LaserPoint(

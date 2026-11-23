@@ -11,14 +11,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import me2008.board.model.*
 import me2008.board.ui.*
 import me2008.board.ui.theme.BoardTheme
-import kotlin.math.hypot
+import me2008.board.viewmodel.BoardViewModel
+import kotlin.math.*
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -29,217 +30,232 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    SmartBoardApp()
+                    val viewModel: BoardViewModel = viewModel()
+                    SmartBoardApp(viewModel)
                 }
             }
         }
     }
 }
 
-class PageState(
-    var bgTheme: BackgroundColorTheme = BackgroundColorTheme.WHITE,
-    var bgPattern: BackgroundPattern = BackgroundPattern.GRID
-) {
-    val pins = mutableStateListOf<PinItem>()
-    val strokes = mutableStateListOf<StrokeItem>()
-    val shapes = mutableStateListOf<DrawnShapeItem>()
-    val circuits = mutableStateListOf<CircuitItem>()
-    val stickers = mutableStateListOf<StickerItem>()
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SmartBoardApp() {
-    // Multi-page state
-    val pages = remember { mutableStateListOf(PageState()) }
-    var currentPageIndex by remember { mutableStateOf(0) }
-    val currentPage = pages[currentPageIndex.coerceIn(0, pages.size - 1)]
+fun SmartBoardApp(viewModel: BoardViewModel) {
+    val currentPage = viewModel.currentPage
 
-    // Tool selection state
-    var currentTool by remember { mutableStateOf(ToolMode.PEN) }
-    var selectedColor by remember { mutableStateOf(Color(0xFFE11D48)) }
-    var strokeSize by remember { mutableStateOf(6f) }
-    var pinShape by remember { mutableStateOf(PinShape.CIRCLE) }
-    var selectedShapeType by remember { mutableStateOf(ShapeType.LINE) }
-    var selectedCircuitType by remember { mutableStateOf(CircuitElementType.RESISTOR) }
-    var selectedStickerType by remember { mutableStateOf(StickerType.STAR) }
-
-    // Math measurement tools state
-    var isRulerVisible by remember { mutableStateOf(false) }
-    var rulerOffset by remember { mutableStateOf(Offset(350f, 300f)) }
-    var rulerAngle by remember { mutableStateOf(0f) }
-
-    var isProtractorVisible by remember { mutableStateOf(false) }
-    var protractorOffset by remember { mutableStateOf(Offset(750f, 300f)) }
-    var protractorAngle by remember { mutableStateOf(0f) }
-
-    // Laser pointer active points
-    val laserPoints = remember { mutableStateListOf<LaserPoint>() }
-
-    // Auto-fade laser points
-    LaunchedEffect(laserPoints.size) {
-        if (laserPoints.isNotEmpty()) {
+    // Auto-fade laser points every 100ms
+    LaunchedEffect(viewModel.laserPoints.size) {
+        if (viewModel.laserPoints.isNotEmpty()) {
             delay(100L)
             val now = System.currentTimeMillis()
-            laserPoints.removeAll { now - it.timestamp > 1200L }
+            viewModel.laserPoints.removeAll { now - it.timestamp > 1200L }
         }
     }
 
-    // Active in-progress drawing
+    // Active in-progress stroke & shape preview
     var activeStrokePoints by remember { mutableStateOf<List<Offset>?>(null) }
     var shapeDragStart by remember { mutableStateOf<Offset?>(null) }
     var previewShape by remember { mutableStateOf<DrawnShapeItem?>(null) }
 
-    // Background style dialog
-    var showBgDialog by remember { mutableStateOf(false) }
+    // Consistent live stroke width
+    val liveStrokeWidth = if (viewModel.currentTool == ToolMode.HIGHLIGHTER) viewModel.strokeSize * 2.2f else viewModel.strokeSize
+    val isHighlighterMode = viewModel.currentTool == ToolMode.HIGHLIGHTER
 
-    // Calculate live stroke width (consistent during drawing and after release)
-    val liveStrokeWidth = if (currentTool == ToolMode.HIGHLIGHTER) strokeSize * 2.2f else strokeSize
-    val isHighlighterMode = currentTool == ToolMode.HIGHLIGHTER
+    // Helper: draw straight line along the ruler measurement edge
+    fun drawLineAlongRuler() {
+        val rad = Math.toRadians(viewModel.rulerAngle.toDouble())
+        val halfLen = 220f
+        val perpX = (36f * sin(rad)).toFloat()
+        val perpY = (-36f * cos(rad)).toFloat()
 
-    // Undo action
-    fun performUndo() {
-        when {
-            currentPage.stickers.isNotEmpty() -> currentPage.stickers.removeAt(currentPage.stickers.size - 1)
-            currentPage.circuits.isNotEmpty() -> currentPage.circuits.removeAt(currentPage.circuits.size - 1)
-            currentPage.shapes.isNotEmpty() -> currentPage.shapes.removeAt(currentPage.shapes.size - 1)
-            currentPage.strokes.isNotEmpty() -> currentPage.strokes.removeAt(currentPage.strokes.size - 1)
-            currentPage.pins.isNotEmpty() -> currentPage.pins.removeAt(currentPage.pins.size - 1)
-        }
-    }
-
-    // Eraser helper
-    fun eraseAt(point: Offset, radius: Float = 36f) {
-        currentPage.pins.removeAll { hypot(it.position.x - point.x, it.position.y - point.y) < (it.size / 2f + radius) }
-        currentPage.stickers.removeAll { hypot(it.position.x - point.x, it.position.y - point.y) < (it.size + radius) }
-        currentPage.circuits.removeAll { hypot(it.position.x - point.x, it.position.y - point.y) < (50f + radius) }
-        currentPage.shapes.removeAll {
-            val midX = (it.start.x + it.end.x) / 2f
-            val midY = (it.start.y + it.end.y) / 2f
-            hypot(midX - point.x, midY - point.y) < radius * 2f
-        }
-        currentPage.strokes.removeAll { stroke ->
-            stroke.points.any { hypot(it.x - point.x, it.y - point.y) < radius }
-        }
+        val p1 = Offset(
+            (viewModel.rulerOffset.x - halfLen * cos(rad)).toFloat() + perpX,
+            (viewModel.rulerOffset.y - halfLen * sin(rad)).toFloat() + perpY
+        )
+        val p2 = Offset(
+            (viewModel.rulerOffset.x + halfLen * cos(rad)).toFloat() + perpX,
+            (viewModel.rulerOffset.y + halfLen * sin(rad)).toFloat() + perpY
+        )
+        currentPage.strokes.add(
+            StrokeItem(
+                points = listOf(p1, p2),
+                color = viewModel.selectedColor,
+                strokeWidth = viewModel.strokeSize.coerceAtLeast(3f)
+            )
+        )
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // 1. Drawing Canvas
+        // 1. Drawing Canvas with Pan & Zoom support
         BoardCanvas(
             pins = currentPage.pins,
             strokes = currentPage.strokes,
             shapes = currentPage.shapes,
             circuits = currentPage.circuits,
             stickers = currentPage.stickers,
+            formulas = currentPage.formulas,
             activeStroke = activeStrokePoints,
-            activeStrokeColor = selectedColor,
+            activeStrokeColor = viewModel.selectedColor,
             activeStrokeWidth = liveStrokeWidth,
             isActiveHighlighter = isHighlighterMode,
             previewShape = previewShape,
-            laserPoints = laserPoints,
+            laserPoints = viewModel.laserPoints,
             bgTheme = currentPage.bgTheme,
             bgPattern = currentPage.bgPattern,
-            isRulerVisible = isRulerVisible,
-            rulerOffset = rulerOffset,
-            rulerAngle = rulerAngle,
-            isProtractorVisible = isProtractorVisible,
-            protractorOffset = protractorOffset,
-            protractorAngle = protractorAngle,
-            toolMode = currentTool,
-            onTap = { offset ->
-                when (currentTool) {
+            isRulerVisible = viewModel.isRulerVisible,
+            rulerOffset = viewModel.rulerOffset,
+            rulerAngle = viewModel.rulerAngle,
+            isProtractorVisible = viewModel.isProtractorVisible,
+            protractorOffset = viewModel.protractorOffset,
+            protractorAngle = viewModel.protractorAngle,
+            toolMode = viewModel.currentTool,
+            zoomScale = viewModel.zoomScale,
+            panOffset = viewModel.panOffset,
+            onTransform = { panChange, zoomChange ->
+                viewModel.panOffset += panChange
+                viewModel.zoomScale = (viewModel.zoomScale * zoomChange).coerceIn(0.4f, 4.0f)
+            },
+            onTap = { boardOffset ->
+                when (viewModel.currentTool) {
                     ToolMode.PIN -> {
                         currentPage.pins.add(
                             PinItem(
-                                position = offset,
-                                color = selectedColor,
-                                size = strokeSize.coerceAtLeast(16f),
-                                shape = pinShape
+                                position = boardOffset,
+                                color = viewModel.selectedColor,
+                                size = viewModel.strokeSize.coerceAtLeast(16f),
+                                shape = viewModel.pinShape
                             )
                         )
                     }
                     ToolMode.CIRCUIT -> {
                         currentPage.circuits.add(
                             CircuitItem(
-                                position = offset,
-                                type = selectedCircuitType,
-                                color = selectedColor
+                                position = boardOffset,
+                                type = viewModel.selectedCircuitType,
+                                color = viewModel.selectedColor
+                            )
+                        )
+                    }
+                    ToolMode.FORMULA -> {
+                        currentPage.formulas.add(
+                            FormulaItem(
+                                position = boardOffset,
+                                text = viewModel.selectedFormulaType.formula,
+                                color = viewModel.selectedColor,
+                                fontSize = (viewModel.strokeSize * 3f).coerceIn(18f, 48f)
                             )
                         )
                     }
                     ToolMode.STICKER -> {
                         currentPage.stickers.add(
                             StickerItem(
-                                position = offset,
-                                type = selectedStickerType,
-                                size = strokeSize.coerceIn(24f, 64f)
+                                position = boardOffset,
+                                type = viewModel.selectedStickerType,
+                                size = (viewModel.strokeSize * 3.5f).coerceIn(24f, 60f)
                             )
                         )
                     }
                     ToolMode.ERASER -> {
-                        eraseAt(offset)
+                        viewModel.eraseAt(boardOffset)
                     }
                     else -> {}
                 }
             },
-            onDragStart = { offset ->
-                when (currentTool) {
+            onDragStart = { boardOffset ->
+                when (viewModel.currentTool) {
                     ToolMode.PEN, ToolMode.HIGHLIGHTER -> {
-                        activeStrokePoints = listOf(offset)
+                        activeStrokePoints = listOf(boardOffset)
+                    }
+                    ToolMode.STRAIGHT_LINE -> {
+                        shapeDragStart = boardOffset
+                        previewShape = DrawnShapeItem(
+                            start = boardOffset,
+                            end = boardOffset,
+                            shapeType = ShapeType.LINE,
+                            color = viewModel.selectedColor,
+                            strokeWidth = liveStrokeWidth.coerceIn(2f, 24f)
+                        )
                     }
                     ToolMode.SHAPE -> {
-                        shapeDragStart = offset
+                        shapeDragStart = boardOffset
                         previewShape = DrawnShapeItem(
-                            start = offset,
-                            end = offset,
-                            shapeType = selectedShapeType,
-                            color = selectedColor,
+                            start = boardOffset,
+                            end = boardOffset,
+                            shapeType = viewModel.selectedShapeType,
+                            color = viewModel.selectedColor,
                             strokeWidth = liveStrokeWidth.coerceIn(2f, 24f)
                         )
                     }
                     ToolMode.LASER -> {
-                        laserPoints.add(LaserPoint(offset))
+                        viewModel.laserPoints.add(LaserPoint(boardOffset))
                     }
                     ToolMode.ERASER -> {
-                        eraseAt(offset)
+                        viewModel.eraseAt(boardOffset)
                     }
                     else -> {}
                 }
             },
-            onDrag = { currentOffset ->
-                when (currentTool) {
+            onDrag = { currentBoardOffset ->
+                when (viewModel.currentTool) {
                     ToolMode.PEN, ToolMode.HIGHLIGHTER -> {
-                        activeStrokePoints = (activeStrokePoints ?: emptyList()) + currentOffset
+                        activeStrokePoints = (activeStrokePoints ?: emptyList()) + currentBoardOffset
+                    }
+                    ToolMode.STRAIGHT_LINE -> {
+                        shapeDragStart?.let { start ->
+                            // Snap to 0, 45, 90 degrees if close
+                            val dx = currentBoardOffset.x - start.x
+                            val dy = currentBoardOffset.y - start.y
+                            val dist = hypot(dx, dy)
+                            var angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble()))
+                            val snapTargets = listOf(0.0, 45.0, 90.0, 135.0, 180.0, -45.0, -90.0, -135.0, -180.0)
+                            for (target in snapTargets) {
+                                if (abs(angle - target) < 6.0) {
+                                    angle = target
+                                    break
+                                }
+                            }
+                            val rad = Math.toRadians(angle)
+                            val snappedEnd = Offset(
+                                (start.x + dist * cos(rad)).toFloat(),
+                                (start.y + dist * sin(rad)).toFloat()
+                            )
+                            previewShape = DrawnShapeItem(
+                                start = start,
+                                end = snappedEnd,
+                                shapeType = ShapeType.LINE,
+                                color = viewModel.selectedColor,
+                                strokeWidth = liveStrokeWidth.coerceIn(2f, 24f)
+                            )
+                        }
                     }
                     ToolMode.SHAPE -> {
                         shapeDragStart?.let { start ->
                             previewShape = DrawnShapeItem(
                                 start = start,
-                                end = currentOffset,
-                                shapeType = selectedShapeType,
-                                color = selectedColor,
+                                end = currentBoardOffset,
+                                shapeType = viewModel.selectedShapeType,
+                                color = viewModel.selectedColor,
                                 strokeWidth = liveStrokeWidth.coerceIn(2f, 24f)
                             )
                         }
                     }
                     ToolMode.LASER -> {
-                        laserPoints.add(LaserPoint(currentOffset))
+                        viewModel.laserPoints.add(LaserPoint(currentBoardOffset))
                     }
                     ToolMode.ERASER -> {
-                        eraseAt(currentOffset)
+                        viewModel.eraseAt(currentBoardOffset)
                     }
                     else -> {}
                 }
             },
             onDragEnd = {
-                when (currentTool) {
+                when (viewModel.currentTool) {
                     ToolMode.PEN, ToolMode.HIGHLIGHTER -> {
                         activeStrokePoints?.let { pts ->
                             if (pts.size > 1) {
                                 currentPage.strokes.add(
                                     StrokeItem(
                                         points = pts,
-                                        color = selectedColor,
+                                        color = viewModel.selectedColor,
                                         strokeWidth = liveStrokeWidth,
                                         isHighlighter = isHighlighterMode
                                     )
@@ -248,7 +264,7 @@ fun SmartBoardApp() {
                         }
                         activeStrokePoints = null
                     }
-                    ToolMode.SHAPE -> {
+                    ToolMode.STRAIGHT_LINE, ToolMode.SHAPE -> {
                         previewShape?.let { shape ->
                             currentPage.shapes.add(shape)
                         }
@@ -258,18 +274,18 @@ fun SmartBoardApp() {
                     else -> {}
                 }
             },
-            onRulerDrag = { dragDelta -> rulerOffset += dragDelta },
-            onRulerRotate = { newAngle -> rulerAngle = newAngle },
-            onProtractorDrag = { dragDelta -> protractorOffset += dragDelta },
-            onProtractorRotate = { newAngle -> protractorAngle = newAngle }
+            onRulerDrag = { dragDelta -> viewModel.rulerOffset += dragDelta },
+            onRulerRotate = { newAngle -> viewModel.rulerAngle = newAngle },
+            onProtractorDrag = { dragDelta -> viewModel.protractorOffset += dragDelta },
+            onProtractorRotate = { newAngle -> viewModel.protractorAngle = newAngle }
         )
 
-        // 2. Ultra-Compact Top Indicator
+        // 2. Compact Top Bar with Board Name & Rotate Helpers
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .padding(horizontal = 10.dp, vertical = 3.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -279,136 +295,85 @@ fun SmartBoardApp() {
                 shadowElevation = 2.dp
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.CastConnected,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(15.dp)
+                        modifier = Modifier.size(14.dp)
                     )
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(3.dp))
                     Text(
                         text = "Touch Board",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontSize = 12.sp
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 11.sp
                     )
                 }
             }
 
-            // Quick ruler angle / clear indicators
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (isRulerVisible) {
+            // Quick rotation helper icons
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (viewModel.isRulerVisible) {
                     FilledTonalIconButton(
-                        onClick = { rulerAngle = (rulerAngle + 45f) % 360f },
-                        modifier = Modifier.size(28.dp)
+                        onClick = { viewModel.rulerAngle = (viewModel.rulerAngle + 45f) % 360f },
+                        modifier = Modifier.size(26.dp)
                     ) {
-                        Icon(Icons.Default.RotateRight, contentDescription = "Rotate Ruler", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.RotateRight, contentDescription = "Rotate Ruler", modifier = Modifier.size(15.dp))
                     }
                 }
-                if (isProtractorVisible) {
+                if (viewModel.isProtractorVisible) {
                     FilledTonalIconButton(
-                        onClick = { protractorAngle = (protractorAngle + 45f) % 360f },
-                        modifier = Modifier.size(28.dp)
+                        onClick = { viewModel.protractorAngle = (viewModel.protractorAngle + 45f) % 360f },
+                        modifier = Modifier.size(26.dp)
                     ) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Rotate Protractor", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Refresh, contentDescription = "Rotate Protractor", modifier = Modifier.size(15.dp))
                     }
                 }
             }
         }
 
-        // 3. Unified Bottom Bar (Pages next to tools in one compact row)
+        // 3. Unified Bottom Bar (Pages next to tools in one sleek row, auto-updating styles)
         UnifiedFloatingBottomBar(
-            currentPage = currentPageIndex,
-            totalPages = pages.size,
-            onPreviousPage = {
-                if (currentPageIndex > 0) currentPageIndex--
-            },
-            onNextPage = {
-                if (currentPageIndex < pages.size - 1) currentPageIndex++
-            },
-            onAddPage = {
-                pages.add(PageState(bgTheme = currentPage.bgTheme, bgPattern = currentPage.bgPattern))
-                currentPageIndex = pages.size - 1
-            },
-            currentTool = currentTool,
-            onToolSelected = { currentTool = it },
-            selectedColor = selectedColor,
-            onColorSelected = { selectedColor = it },
-            strokeSize = strokeSize,
-            onStrokeSizeChange = { strokeSize = it },
-            pinShape = pinShape,
-            onPinShapeChange = { pinShape = it },
-            selectedShapeType = selectedShapeType,
-            onShapeTypeChange = { selectedShapeType = it },
-            selectedCircuitType = selectedCircuitType,
-            onCircuitTypeChange = { selectedCircuitType = it },
-            selectedStickerType = selectedStickerType,
-            onStickerTypeChange = { selectedStickerType = it },
-            isRulerActive = isRulerVisible,
-            onToggleRuler = { isRulerVisible = !isRulerVisible },
-            isProtractorActive = isProtractorVisible,
-            onToggleProtractor = { isProtractorVisible = !isProtractorVisible },
-            onOpenBgSettings = { showBgDialog = true },
-            onUndo = { performUndo() },
-            onClearPage = {
-                currentPage.pins.clear()
-                currentPage.strokes.clear()
-                currentPage.shapes.clear()
-                currentPage.circuits.clear()
-                currentPage.stickers.clear()
-            },
+            currentPage = viewModel.currentPageIndex,
+            totalPages = viewModel.pages.size,
+            onPreviousPage = { viewModel.previousPage() },
+            onNextPage = { viewModel.nextPage() },
+            onAddPage = { viewModel.addPage() },
+            currentTool = viewModel.currentTool,
+            onToolSelected = { viewModel.currentTool = it },
+            selectedColor = viewModel.selectedColor,
+            onColorSelected = { viewModel.selectedColor = it },
+            strokeSize = viewModel.strokeSize,
+            onStrokeSizeChange = { viewModel.strokeSize = it },
+            pinShape = viewModel.pinShape,
+            onPinShapeChange = { viewModel.pinShape = it },
+            selectedShapeType = viewModel.selectedShapeType,
+            onShapeTypeChange = { viewModel.selectedShapeType = it },
+            selectedCircuitType = viewModel.selectedCircuitType,
+            onCircuitTypeChange = { viewModel.selectedCircuitType = it },
+            selectedStickerType = viewModel.selectedStickerType,
+            onStickerTypeChange = { viewModel.selectedStickerType = it },
+            selectedFormulaType = viewModel.selectedFormulaType,
+            onFormulaTypeChange = { viewModel.selectedFormulaType = it },
+            isRulerActive = viewModel.isRulerVisible,
+            onToggleRuler = { viewModel.isRulerVisible = !viewModel.isRulerVisible },
+            onDrawLineAlongRuler = { drawLineAlongRuler() },
+            isProtractorActive = viewModel.isProtractorVisible,
+            onToggleProtractor = { viewModel.isProtractorVisible = !viewModel.isProtractorVisible },
+            bgTheme = currentPage.bgTheme,
+            onBgThemeChange = { currentPage.bgTheme = it },
+            bgPattern = currentPage.bgPattern,
+            onBgPatternChange = { currentPage.bgPattern = it },
+            zoomScale = viewModel.zoomScale,
+            onResetZoom = { viewModel.resetZoom() },
+            onUndo = { viewModel.performUndo() },
+            onClearPage = { viewModel.clearCurrentPage() },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 4.dp)
+                .padding(bottom = 3.dp)
         )
-
-        // Compact Background & Pattern Settings Dialog
-        if (showBgDialog) {
-            AlertDialog(
-                onDismissRequest = { showBgDialog = false },
-                title = { Text("Board Style", fontSize = 15.sp) },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Theme:", fontSize = 12.sp, style = MaterialTheme.typography.titleSmall)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            BackgroundColorTheme.values().forEach { theme ->
-                                FilterChip(
-                                    selected = currentPage.bgTheme == theme,
-                                    onClick = { currentPage.bgTheme = theme },
-                                    label = { Text(theme.displayName, fontSize = 10.sp) },
-                                    modifier = Modifier.height(26.dp)
-                                )
-                            }
-                        }
-
-                        Text("Grid / Pattern:", fontSize = 12.sp, style = MaterialTheme.typography.titleSmall)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            BackgroundPattern.values().forEach { pattern ->
-                                FilterChip(
-                                    selected = currentPage.bgPattern == pattern,
-                                    onClick = { currentPage.bgPattern = pattern },
-                                    label = { Text(pattern.displayName, fontSize = 10.sp) },
-                                    modifier = Modifier.height(26.dp)
-                                )
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { showBgDialog = false }) {
-                        Text("Done", fontSize = 12.sp)
-                    }
-                }
-            )
-        }
     }
 }
