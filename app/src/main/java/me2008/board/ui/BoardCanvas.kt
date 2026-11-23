@@ -199,7 +199,7 @@ fun buildSmoothPath(points: List<Offset>): Path {
         if (i == 1) {
             path.lineTo(midX, midY)
         } else {
-            path.quadraticTo(prev.x, prev.y, midX, midY)
+            path.quadraticBezierTo(prev.x, prev.y, midX, midY)
         }
     }
     path.lineTo(points.last().x, points.last().y)
@@ -437,8 +437,8 @@ private fun DrawScope.drawCircuitElement(circuit: CircuitItem) {
             drawCircle(c, radius = 20f, center = Offset(x, y), style = Stroke(3.5f))
             val path = Path().apply {
                 moveTo(x - 12f, y)
-                quadraticTo(x - 6f, y - 10f, x, y)
-                quadraticTo(x + 6f, y + 10f, x + 12f, y)
+                quadraticBezierTo(x - 6f, y - 10f, x, y)
+                quadraticBezierTo(x + 6f, y + 10f, x + 12f, y)
             }
             drawPath(path, c, style = Stroke(2.5f, cap = StrokeCap.Round))
             drawLine(c, Offset(x + 20f, y), Offset(x + 45f, y), strokeWidth = 3.5f)
