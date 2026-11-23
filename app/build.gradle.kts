@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace = "me2008.board"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "me2008.board"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
     }
